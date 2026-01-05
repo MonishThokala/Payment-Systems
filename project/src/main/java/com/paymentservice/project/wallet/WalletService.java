@@ -1,6 +1,7 @@
 package com.paymentservice.project.wallet;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 
 import org.springframework.stereotype.Service;
@@ -15,12 +16,40 @@ public class WalletService {
     private final WalletRepository walletRepository;
     private final WalletTransactionRepository transactionRepository;
     private final FraudDetectionService fraudDetectionService;
+    private final MlFraudClient mlFraudClient;
     
     public WalletService(WalletRepository walletRepository,
-            WalletTransactionRepository transactionRepository,FraudDetectionService fraudDetectionService) {
+            WalletTransactionRepository transactionRepository,FraudDetectionService fraudDetectionService, MlFraudClient mlFraudClient) {
     	this.walletRepository = walletRepository;
     	this.transactionRepository = transactionRepository;
     	this.fraudDetectionService = fraudDetectionService;
+    	this.mlFraudClient = mlFraudClient;
+    }
+
+    private FraudFeatureRequest buildFraudFeatures(
+            Wallet wallet,
+            CreditDebitRequest request) {
+
+        FraudFeatureRequest features = new FraudFeatureRequest();
+
+        features.setAmount(request.getAmount());
+
+        features.setWalletAgeDays(
+            Duration.between(wallet.getCreatedTime(), Instant.now()).toDays()
+        );
+
+        features.setTxnCountLast1Min(
+            transactionRepository.countByWallet_UserIdAndCreatedAtAfter(
+                wallet.getUserId(),
+                Instant.now().minusSeconds(60)
+            )
+        );
+
+        features.setAvgTxnAmount(
+            transactionRepository.findAverageAmountByUserId(wallet.getUserId())
+                .orElse(BigDecimal.ZERO));
+
+        return features;
     }
 
     
@@ -54,19 +83,28 @@ public class WalletService {
             Wallet wallet = walletRepository.findById(request.getUserId()).orElseThrow();
             return new WalletResponse(wallet.getUserId(), wallet.getBalance(),wallet.getCurrency(),wallet.getCreatedTime(),wallet.getLastTransaction());
         }
+        
 
         Wallet wallet = walletRepository.findById(request.getUserId()).orElseThrow();
         
-        FraudDetection detection = fraudDetectionService.evaluate(request,wallet);
-        
-        if(detection==FraudDetection.BLOCK)
-        {
-        	throw new FraudDetectedException("Transaction is at high risk");
+        FraudFeatureRequest features = buildFraudFeatures(wallet, request);
+
+        double fraudScore = mlFraudClient.getFraudScore(features);
+
+        if (fraudScore >= 0.5) {
+            throw new FraudDetectedException("Blocked by ML fraud detection");
         }
         
-        if (request.getAmount().compareTo(BigDecimal.valueOf(50000)) > 0) {
-        	throw new DocumentVerificationException("Verification of document is required to credit more than : " + request.getAmount());
-        }
+//        FraudDetection detection = fraudDetectionService.evaluate(request,wallet);
+//        
+//        if(detection==FraudDetection.BLOCK)
+//        {
+//        	throw new FraudDetectedException("Transaction is at high risk");
+//        }
+        
+//        if (request.getAmount().compareTo(BigDecimal.valueOf(50000)) > 0) {
+//        	throw new DocumentVerificationException("Verification of document is required to credit more than : " + request.getAmount());
+//        }
         
         WalletTransaction txn = new WalletTransaction();
         

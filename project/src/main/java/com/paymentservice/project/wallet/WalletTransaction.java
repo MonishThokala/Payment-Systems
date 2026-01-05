@@ -35,6 +35,10 @@ public class WalletTransaction {
     private String referenceId;
 
     private Instant createdAt;
+    
+    @ManyToOne
+    @JoinColumn(name = "wallet_id")
+    private Wallet wallet;
 
     
     
