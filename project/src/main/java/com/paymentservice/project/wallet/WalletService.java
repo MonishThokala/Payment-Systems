@@ -8,22 +8,36 @@ import org.springframework.stereotype.Service;
 
 import jakarta.transaction.Transactional;
 import lombok.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 
 @Service
 @RequiredArgsConstructor
 public class WalletService {
+	
+	private static final Logger log =
+	        LoggerFactory.getLogger(WalletService.class);
+
 
     private final WalletRepository walletRepository;
     private final WalletTransactionRepository transactionRepository;
     private final FraudDetectionService fraudDetectionService;
     private final MlFraudClient mlFraudClient;
+    private final MlFraudProperties fraudProperties;
     
     public WalletService(WalletRepository walletRepository,
-            WalletTransactionRepository transactionRepository,FraudDetectionService fraudDetectionService, MlFraudClient mlFraudClient) {
+            WalletTransactionRepository transactionRepository,FraudDetectionService fraudDetectionService, MlFraudClient mlFraudClient,
+            MlFraudProperties fraudProperties) {
     	this.walletRepository = walletRepository;
     	this.transactionRepository = transactionRepository;
     	this.fraudDetectionService = fraudDetectionService;
     	this.mlFraudClient = mlFraudClient;
+    	this.fraudProperties = fraudProperties;
+    }
+    
+    private boolean isHighRisk(double fraudScore) {
+        return fraudScore >= fraudProperties.getThreshold();
     }
 
     private FraudFeatureRequest buildFraudFeatures(
@@ -90,10 +104,20 @@ public class WalletService {
         FraudFeatureRequest features = buildFraudFeatures(wallet, request);
 
         double fraudScore = mlFraudClient.getFraudScore(features);
-
-        if (fraudScore >= 0.5) {
+        
+        if (!fraudProperties.isShadowMode() && isHighRisk(fraudScore)) {
             throw new FraudDetectedException("Blocked by ML fraud detection");
         }
+
+        if (fraudProperties.isShadowMode() && isHighRisk(fraudScore)) {
+            log.warn("SHADOW MODE: High-risk txn user={}, score={}",
+                     wallet.getUserId(), fraudScore);
+        }
+
+//        if (fraudScore >= 0.5) {
+//            throw new FraudDetectedException("Blocked by ML fraud detection");
+//        }
+        
         
 //        FraudDetection detection = fraudDetectionService.evaluate(request,wallet);
 //        
