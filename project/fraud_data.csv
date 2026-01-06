@@ -1,7 +1,0 @@
-amount,walletAgeDays,txnCountLast1Min,avgTxnAmount,isFraud
-500,200,1,800,0
-120000,1,5,4000,1
-30000,10,4,5000,1
-200,180,1,300,0
-70000,2,4,6000,1
-1000,365,1,900,0
